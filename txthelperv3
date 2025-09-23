@@ -1,0 +1,176 @@
+import customtkinter as ctk
+from tkinter import messagebox
+import json
+import os
+import keyboard
+import pyperclip
+import threading
+import time
+
+# Nome do arquivo para salvar os atalhos
+ARQUIVO_JSON = "atalhos.json"
+
+# --- Funções para JSON ---
+def carregar_atalhos():
+    if os.path.exists(ARQUIVO_JSON):
+        with open(ARQUIVO_JSON, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+def salvar_atalhos():
+    with open(ARQUIVO_JSON, "w", encoding="utf-8") as f:
+        json.dump(atalhos, f, ensure_ascii=False, indent=4)
+
+# --- Funções da UI ---
+def adicionar_atalho():
+    gatilho = entry_gatilho.get().strip()
+    texto = text_predefinido.get("1.0", "end-1c").strip()
+
+    if not gatilho or not texto:
+        messagebox.showwarning("Aviso", "Preencha o gatilho e o texto!")
+        return
+
+    atalhos[gatilho] = texto
+    salvar_atalhos()
+    atualizar_lista()
+    atualizar_buffer_monitor()
+    entry_gatilho.delete(0, "end")
+    text_predefinido.delete("1.0", "end")
+
+def editar_atalho():
+    selecionado = lista_atalhos.get("current linestart", "current lineend").strip()
+    if not selecionado:
+        messagebox.showwarning("Aviso", "Selecione um atalho para editar!")
+        return
+
+    gatilho = entry_gatilho.get().strip()
+    texto = text_predefinido.get("1.0", "end-1c").strip()
+
+    if not gatilho or not texto:
+        messagebox.showwarning("Aviso", "Preencha o gatilho e o texto!")
+        return
+
+    atalhos[gatilho] = texto
+    salvar_atalhos()
+    atualizar_lista()
+    atualizar_buffer_monitor()
+
+def remover_atalho():
+    selecionado = lista_atalhos.get("current linestart", "current lineend").strip()
+    if not selecionado:
+        messagebox.showwarning("Aviso", "Selecione um atalho para remover!")
+        return
+
+    gatilho = selecionado.split(" -> ")[0]
+
+    if gatilho in atalhos:
+        del atalhos[gatilho]
+        salvar_atalhos()
+        atualizar_lista()
+        atualizar_buffer_monitor()
+
+def selecionar_item(event=None):
+    try:
+        linha = lista_atalhos.get("current linestart", "current lineend").strip()
+        gatilho = linha.split(" -> ")[0]
+        texto = atalhos[gatilho]
+
+        entry_gatilho.delete(0, "end")
+        entry_gatilho.insert(0, gatilho)
+
+        text_predefinido.delete("1.0", "end")
+        text_predefinido.insert("1.0", texto)
+    except:
+        pass
+
+def atualizar_lista():
+    lista_atalhos.configure(state="normal")
+    lista_atalhos.delete("1.0", "end")
+    for gatilho, texto in atalhos.items():
+        lista_atalhos.insert("end", f"{gatilho} -> {texto[:30]}...\n")
+    lista_atalhos.configure(state="disabled")
+
+# --- Monitoramento em tempo real ---
+buffer = ""
+monitor_ativo = True
+monitor_atalhos = {}
+
+def atualizar_buffer_monitor():
+    global monitor_atalhos
+    monitor_atalhos = atalhos.copy()
+
+def monitor():
+    global buffer
+    while monitor_ativo:
+        event = keyboard.read_event()
+        if event.event_type == keyboard.KEY_DOWN and len(event.name) == 1:
+            buffer += event.name
+
+            max_len = max([len(k) for k in monitor_atalhos.keys()] + [0])
+            if len(buffer) > max_len + 5:
+                buffer = buffer[-(max_len + 5):]
+
+            for gatilho, texto in monitor_atalhos.items():
+                if buffer.endswith(gatilho):
+                    for _ in range(len(gatilho)):
+                        keyboard.press_and_release("backspace")
+                    pyperclip.copy(texto)
+                    keyboard.press_and_release("ctrl+v")
+                    buffer = ""
+                    break
+        time.sleep(0.01)
+
+# --- INÍCIO DO PROGRAMA ---
+atalhos = carregar_atalhos()
+monitor_atalhos = atalhos.copy()
+
+# Configuração inicial do CustomTkinter
+ctk.set_appearance_mode("dark")  # "light" | "dark" | "system"
+ctk.set_default_color_theme("blue")  # cores: "blue", "green", "dark-blue"
+
+# Janela principal
+janela = ctk.CTk()
+janela.title("Gerenciador de Atalhos")
+janela.geometry("600x600")
+
+# Campo de gatilho
+label_gatilho = ctk.CTkLabel(janela, text="Gatilho:")
+label_gatilho.pack(pady=5)
+entry_gatilho = ctk.CTkEntry(janela, width=300)
+entry_gatilho.pack(pady=5)
+
+# Campo de texto predefinido
+label_texto = ctk.CTkLabel(janela, text="Texto predefinido:")
+label_texto.pack(pady=5)
+text_predefinido = ctk.CTkTextbox(janela, width=500, height=100)
+text_predefinido.pack(pady=5)
+
+# Botões
+frame_botoes = ctk.CTkFrame(janela)
+frame_botoes.pack(pady=10)
+
+btn_adicionar = ctk.CTkButton(frame_botoes, text="Adicionar", command=adicionar_atalho)
+btn_adicionar.grid(row=0, column=0, padx=5)
+btn_editar = ctk.CTkButton(frame_botoes, text="Editar", command=editar_atalho)
+btn_editar.grid(row=0, column=1, padx=5)
+btn_remover = ctk.CTkButton(frame_botoes, text="Remover", command=remover_atalho)
+btn_remover.grid(row=0, column=2, padx=5)
+
+# Lista de atalhos
+label_lista = ctk.CTkLabel(janela, text="Atalhos cadastrados:")
+label_lista.pack(pady=5)
+lista_atalhos = ctk.CTkTextbox(janela, width=500, height=200)
+lista_atalhos.pack(pady=5)
+lista_atalhos.configure(state="disabled")
+lista_atalhos.bind("<Button-1>", selecionar_item)
+
+atualizar_lista()
+
+# Thread do monitor
+t = threading.Thread(target=monitor, daemon=True)
+t.start()
+
+janela.mainloop()
+
+# Para quando fechar a UI
+monitor_ativo = False
